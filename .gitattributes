@@ -1,0 +1,27 @@
+# 文本文件统一规范化（入库用 LF，检出按平台）
+* text=auto
+
+# 源码与文档统一 LF（跨平台一致）
+*.py    text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.bat   text eol=lf
+*.cmd   text eol=lf
+
+# Windows 脚本检出为 CRLF 更安全（bat/cmd 兼容性）
+# *.bat text eol=crlf
+
+# 二进制文件
+*.exe   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.db    binary
+
+# GitHub 语言统计
+*.py    linguist-language=Python
+*.bat   linguist-language=Batchfile
