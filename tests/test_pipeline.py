@@ -84,8 +84,26 @@ def main():
         check("C2 顺序正确", urls_c[0].endswith("chapter-one.html")
               and urls_c[-1].endswith("chapter-six.html"), urls_c)
 
+        # ---------- 场景 G：正文容器外数字页码分页（遍历链接找后续页） ----------
+        print("== 场景G：容器外数字页码分页 ==")
+        urls_g = discover.discover_chapters(
+            fetcher, [f"{BASE}/bg/g1.html"],
+            max_chapters=cfg.get("max_chapters"))
+        check("G1 从章节页发现2章", len(urls_g) == 2, f"got {len(urls_g)}")
+        book_g = BookCrawler(fetcher, cfg).crawl([f"{BASE}/bg/g1.html"],
+                                                 title_hint="分页测试")
+        check("G2 抓取2章", book_g.chapter_count == 2, f"got {book_g.chapter_count}")
+        ch1 = book_g.chapters[0]
+        check("G3 第1章三页分页已合并18段", len(ch1.paragraphs) == 18,
+              f"paras={len(ch1.paragraphs)}")
+        check("G4 标题取首页(无页码后缀)", ch1.title == "第1章·分页测试",
+              ch1.title)
+        check("G5 正文不含第2章内容",
+              "第二章独有内容" not in ch1.body, ch1.body[:50])
+        check("G6 第2章独立抓取", book_g.chapters[1].title == "第2章·分页测试",
+              book_g.chapters[1].title)
+
         # ---------- 场景 D：导出 TXT + EPUB ----------
-        print("== 场景D：导出 ==")
         tmp = tempfile.mkdtemp(prefix="txtcatcher_test_")
         try:
             txt = os.path.join(tmp, "测试小说.txt")

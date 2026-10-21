@@ -28,6 +28,9 @@ logs/
 # ---------- 测试临时文件 ----------
 tests/*.log
 
+# ---------- 设计过程文件（Brief/Prompt 记录，不提交） ----------
+.creative-design/
+
 # ---------- 编辑器 / 系统 ----------
 .idea/
 .vscode/
@@ -39,6 +42,9 @@ Thumbs.db
 desktop.ini
 
 # ---------- 环境 ----------
+.buildenv/
+.py312/
+.pyinstaller/
 .venv/
 venv/
 env/

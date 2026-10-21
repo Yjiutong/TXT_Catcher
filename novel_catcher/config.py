@@ -24,7 +24,8 @@ DEFAULTS = {
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "max_chapters": 8000,      # 单本书章节数量安全上限
-    "max_chapter_pages": 5,    # 单章正文分页最大页数
+    "max_chapter_pages": 10,   # 单章正文分页最大页数
+    "site_rules": {},          # 站点规则扩展（域名 -> 选择器配置），覆盖/补充内置规则
 }
 
 

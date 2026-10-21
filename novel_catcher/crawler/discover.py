@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 
 from .http import HttpFetcher, FetchError, Page
 from . import extract
+from .rules import rule_for
 from .. import utils
 
 # 目录页链接文本
@@ -72,14 +73,21 @@ def _toc_like_element(el) -> bool:
     return bool(_TOC_IDCLASS_RE.search(idc))
 
 
-def find_embedded_chapter_list(page: Page) -> list:
+def find_embedded_chapter_list(page: Page, rule=None) -> list:
     """查找章节页内嵌的完整章节列表元素（侧栏/底部目录）。
 
-    返回 (title, url) 列表；找不到返回空列表。
+    有站点规则时优先用规则的 toc 选择器；返回 (title, url) 列表。
     """
     soup = page.soup
     if soup is None:
         return []
+    if rule and (rule.get("toc") or ""):
+        try:
+            el = soup.select_one(rule["toc"])
+        except Exception:
+            el = None
+        if el is not None and len(el.find_all("a", href=True)) >= 8:
+            return _parse_link_list(el, page)
     best_el, best_n = None, 0
     for el in soup.find_all(["div", "ul", "ol", "dl", "select"]):
         if el.name == "select":
@@ -95,11 +103,23 @@ def find_embedded_chapter_list(page: Page) -> list:
     return _parse_link_list(best_el, page)
 
 
-def parse_toc_page(page: Page) -> list:
-    """解析目录页，返回 (title, url) 章节列表。"""
+def parse_toc_page(page: Page, rule=None) -> list:
+    """解析目录页，返回 (title, url) 章节列表。
+
+    有站点规则时优先用规则的 toc 选择器定位目录容器，否则启发式。
+    """
     soup = page.soup
     if soup is None:
         return []
+    if rule and (rule.get("toc") or ""):
+        try:
+            el = soup.select_one(rule["toc"])
+        except Exception:
+            el = None
+        if el is not None:
+            links = _parse_link_list(el, page)
+            if len(links) >= 5:
+                return links
     # 目录容器：优先 id/class 匹配；否则选链接最多的容器
     containers = []
     for el in soup.find_all(["div", "ul", "ol", "dl"]):
@@ -114,6 +134,23 @@ def parse_toc_page(page: Page) -> list:
     # 兜底：全页链接聚类
     all_links = _parse_link_list(soup, page)
     return all_links
+
+
+def _find_toc_link_rule(page: Page, rule) -> str:
+    """按规则的 toc_link 选择器找“目录”入口链接。"""
+    if page is None or page.soup is None or not (rule or {}).get("toc_link"):
+        return ""
+    try:
+        el = page.soup.select_one(rule["toc_link"])
+    except Exception:
+        return ""
+    if el is None:
+        return ""
+    href = (el.get("href") or "").strip()
+    if not href or href.startswith(("javascript:", "#", "mailto:")):
+        return ""
+    abs_url = page.resolve(href)
+    return abs_url if abs_url and abs_url != page.url else ""
 
 
 def _parse_link_list(scope, page: Page) -> list:
@@ -197,8 +234,8 @@ def infer_by_url_pattern(fetcher: HttpFetcher, seed_urls: list, max_chapters: in
 
 
 def walk_by_next_link(fetcher: HttpFetcher, start_url: str, max_chapters: int,
-                      forward: bool = True) -> list:
-    """沿“下一章/上一章”链接行走，收集章节 URL。"""
+                      forward: bool = True, rule=None) -> list:
+    """沿“下一章/上一章”链接行走，收集章节 URL。有站点规则时用规则的 next 选择器。"""
     urls = []
     visited = set()
     cur = start_url
@@ -212,7 +249,9 @@ def walk_by_next_link(fetcher: HttpFetcher, start_url: str, max_chapters: int,
         except FetchError:
             break
         if forward:
-            nxt = extract.find_next_chapter_link(page)
+            nxt = extract.find_next_chapter_link_by_rule(page, rule)
+            if not nxt:
+                nxt = extract.find_next_chapter_link(page)
         else:
             nxt = extract.find_prev_chapter_link(page)
         if not nxt or not utils.is_same_host(cur, nxt):
@@ -230,10 +269,11 @@ def _sort_key(url: str, order_index: dict) -> tuple:
 
 
 def discover_chapters(fetcher: HttpFetcher, seed_urls: list,
-                      max_chapters: int = 8000, progress=None) -> list:
+                      max_chapters: int = 8000, rules=None, progress=None) -> list:
     """核心：根据用户提供的若干章节网址，推测整本书章节列表。
 
     策略优先级：
+      0) 站点规则（目录入口 / 目录容器 / 下一章选择器，规则优先）
       1) 目录页（章节页里的“目录”链接）→ 完整目录
       2) 章节页内嵌章节列表（侧栏目录）
       3) URL 数字模式推断（向两端扩展并验证）
@@ -248,6 +288,8 @@ def discover_chapters(fetcher: HttpFetcher, seed_urls: list,
 
     found = list(seeds)
     order_index = {u: i for i, u in enumerate(seeds)}
+    # 站点规则：以第一个种子匹配（同站种子规则一致）
+    rule = rule_for(seeds[0], rules) if seeds else {}
 
     def _log(msg):
         if progress:
@@ -256,12 +298,12 @@ def discover_chapters(fetcher: HttpFetcher, seed_urls: list,
     # 策略 1+2：目录
     try:
         first_page = fetcher.fetch(seeds[0])
-        toc_link = find_toc_link(first_page)
+        toc_link = _find_toc_link_rule(first_page, rule) or find_toc_link(first_page)
         if toc_link:
             _log(f"发现目录页：{toc_link}")
             try:
                 toc_page = fetcher.fetch(toc_link)
-                toc_links = parse_toc_page(toc_page)
+                toc_links = parse_toc_page(toc_page, rule)
                 if len(toc_links) >= 5:
                     found = [u for _, u in toc_links]
                     order_index = {u: i for i, u in enumerate(found)}
@@ -270,7 +312,7 @@ def discover_chapters(fetcher: HttpFetcher, seed_urls: list,
             except FetchError:
                 _log("目录页抓取失败，尝试其他策略")
         # 内嵌列表
-        embedded = find_embedded_chapter_list(first_page)
+        embedded = find_embedded_chapter_list(first_page, rule)
         if len(embedded) >= 8:
             found = [u for _, u in embedded]
             order_index = {u: i for i, u in enumerate(found)}
@@ -295,9 +337,9 @@ def discover_chapters(fetcher: HttpFetcher, seed_urls: list,
     for seed in seeds:
         if seed in visited_all:
             continue
-        back = walk_by_next_link(fetcher, seed, max_chapters, forward=False)
+        back = walk_by_next_link(fetcher, seed, max_chapters, forward=False, rule=rule)
         back.reverse()
-        fwd = walk_by_next_link(fetcher, seed, max_chapters, forward=True)
+        fwd = walk_by_next_link(fetcher, seed, max_chapters, forward=True, rule=rule)
         for u in back + fwd:
             if u not in visited_all:
                 visited_all.add(u)

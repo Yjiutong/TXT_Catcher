@@ -8,6 +8,7 @@ from novel_catcher.config import Config
 from novel_catcher.crawler.http import HttpFetcher
 from novel_catcher.crawler import discover
 from novel_catcher.crawler.pipeline import BookCrawler
+from novel_catcher.crawler.rules import get_rules
 from novel_catcher.exporter.txt import export_txt, default_txt_path
 from novel_catcher.exporter.epub import export_epub, default_epub_path
 
@@ -40,6 +41,7 @@ def main():
     try:
         urls = discover.discover_chapters(fetcher, args.urls,
                                           max_chapters=cfg.get("max_chapters"),
+                                          rules=get_rules(cfg),
                                           progress=lambda m: print(f"  * {m}", flush=True))
     except Exception as e:
         print(f"章节发现失败：{e}")

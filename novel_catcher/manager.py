@@ -33,7 +33,8 @@ class DownloadManager:
 
     # ---- 对外接口 ----
     def add_download(self, title: str, author: str, seed_urls: list) -> int:
-        seeds = [utils.normalize_url(u) for u in seed_urls if utils.normalize_url(u)]
+        seeds = [utils.normalize_url(u) for u in seed_urls
+                 if utils.normalize_url(u).startswith(("http://", "https://"))]
         if not seeds:
             raise ValueError("没有有效的章节网址")
         book_id = self.db.add_book(title, author, seeds)

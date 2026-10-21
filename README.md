@@ -1,140 +1,98 @@
-# TXT_Catcher 公版小说抓取器
+# TXT_Catcher 阅读捕获浏览器
 
-> 从网页抓取**非版权（公版）小说**并自动整合为 TXT + EPUB 的桌面工具。
-> 只需提供书中**任意几章网址**，自动推测整本书章节位置并抓取整理。
+> 不再做“给几章网址就自动抓全本”。现在把它当**阅读浏览器**用：
+> 从顶部输入网址进入小说页，浏览过的、疑似小说正文/目录的文本会被捕获，
+> 最后导出一个捕获包，交给 Codex 的 `novel_pack_to_epub` skill 整理成 EPUB。
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
 ![GUI](https://img.shields.io/badge/GUI-Tkinter-5C7CFA)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-1.0.0-blue)
+![Version](https://img.shields.io/badge/Version-2.0.0-blue)
 
 ---
-
-## 目录
-
-- [功能特性](#功能特性)
-- [使用边界](#使用边界)
-- [快速开始](#快速开始)
-- [使用说明](#使用说明)
-- [章节推测原理](#章节推测原理)
-- [命令行模式](#命令行模式)
-- [项目结构](#项目结构)
-- [测试](#测试)
-- [常见问题](#常见问题)
-- [贡献指南](#贡献指南)
-- [许可证](#许可证)
-
----
-
-## 功能特性
-
-- 🔍 **章节位置自动推测**：只给几章网址，自动补齐全书（目录页 → 内嵌目录 → URL 数字推断 → 上下章链接，四层策略）
-- 🧹 **正文智能清洗**：自动定位正文容器、剔除广告/导航/版权声明、识别 UTF-8/GBK/GB18030 编码、合并正文分页、去除重复段落
-- 🖥️ **桌面可视化管理**：书籍库（打开/重下/删除）+ 下载任务（实时进度/日志/取消）+ 设置面板
-- 📦 **TXT + EPUB 双格式输出**：TXT 含完整目录；EPUB 带可点击目录（NCX/NAV），可直接导入阅读器
-- 🔒 **浏览器指纹模拟**：基于 curl_cffi 绕过常见 TLS 反爬，自动重试与限速
-
-## 使用边界
-
-> ⚠️ **本工具仅适用于非版权（公版）作品**（如四大名著、公版译著等）。
-> 请勿用于抓取受版权保护的作品，并请遵守目标网站的访问规则与当地法律。
 
 ## 快速开始
 
-### 方式 A：直接运行打包程序（推荐）
-
-下载或构建 `TXT_Catcher.exe`，双击即用，无需安装 Python。
-
-### 方式 B：源码运行
-
-需要 Python 3.10+：
+- 直接双击根目录 `run.bat`，优先启动 `dist\TXT_Catcher.exe`。
+- 源码运行：
 
 ```bat
-pip install -r requirements.txt
-python app.py
+.\.buildenv\Scripts\pythonw.exe app.py
 ```
 
-或直接双击 `run.bat`。
+## 使用流程
 
-## 使用说明
+1. 打开应用，首页是**阅读浏览**。
+2. 在顶部地址栏输入小说页网址，点击 **前往**。
+3. 应用会抓取并清洗当前页：
+   - 目录页 → 显示“目录候选”，可点击章节链接继续浏览。
+   - 正文页 → 显示“正文候选”，把正文段落收进捕获包。
+   - 其他页面 → 仍记录 URL 与文本，方便 Codex 判断。
+4. 右侧“已捕获页面”列表实时汇总你浏览过的页面。
+5. 浏览完点击 **导出捕获包**，生成 zip / 文件夹。
+6. 把捕获包交给 Codex，按 `skills/novel_pack_to_epub/SKILL.md` 整理为 EPUB + TXT。
 
-1. 点击 **「＋ 新建下载」**
-2. 粘贴 **1 个或几个章节网址**（每行一个，例如只给第 2 回和第 57 回的链接）
-3. 可选填写书名、作者（留空则自动从页面提取）
-4. 点击 **「预览章节位置」**，确认工具推测出的章节总数
-5. 点击 **「开始下载」**，完成后自动生成 `书名.txt` 与 `书名.epub` 到输出目录（默认 `output\`）
+## 捕获包结构
 
-| 页签 | 功能 |
-|---|---|
-| 书籍库 | 已下载书籍：书名/作者/章节/字数/状态；打开 TXT/EPUB、重新下载、删除记录 |
-| 下载任务 | 运行中任务进度、阶段与运行日志；可取消 |
-| 设置 | 输出目录、并发数、超时、重试次数、请求间隔 |
+导出位置默认是：
 
-## 章节推测原理
+```text
+output/capture_packages/<书名或阅读捕获>_<时间戳>.zip
+├── manifest.json   # 包说明、书名、作者、统计
+├── pages.json      # 完整捕获包（schema_version=1）
+└── all_text.txt    # 按页面拼接的可读文本
+```
 
-按以下优先级自动推测整本书章节（用户只需提供任意几章）：
+## Codex skill
 
-1. **目录页发现**：从章节页找「目录 / 章节列表」链接并解析全部章节
-2. **页面内嵌目录**：章节页侧栏/底部自带的章节列表直接解析
-3. **URL 数字推断**：从已有网址提取数字模式（如 `…/book/123.html`），向两端扩展并逐页验证（自动识别零填充如 `第001回`）
-4. **上下章链接行走**：沿「上一章 / 下一章」链接向前后遍历
+仓库内已经提供 skill：
 
-## 命令行模式
+```text
+skills/novel_pack_to_epub/
+├── SKILL.md
+└── scripts/build_epub_from_package.py
+```
+
+把捕获包 zip 交给 Codex 后，可以用这个命令直接整理：
 
 ```bat
-:: 下载整本
-python cli.py "https://example.com/book/2.html" "https://example.com/book/57.html" -t 书名 -a 作者
-
-:: 仅预览章节发现结果
-python cli.py "https://example.com/book/2.html" --discover-only
+.\.buildenv\Scripts\python.exe skills\novel_pack_to_epub\scripts\build_epub_from_package.py "output\capture_packages\xxx.zip" "output"
 ```
+
+输出 `书名.epub` 和 `书名.txt`。skill 会按目录候选排序、按 URL 去重、把正文段落组装成章节。
 
 ## 项目结构
 
-```
-├── app.py                    # 桌面应用入口
-├── cli.py                    # 命令行模式
-├── run.bat                   # 一键启动
-├── build.bat                 # 一键打包 exe（PyInstaller）
-├── requirements.txt
+```text
+├── app.py                          # 桌面应用入口：阅读浏览器 UI
+├── run.bat                         # 一键启动
+├── build.bat                       # 一键打包 exe
+├── skills/novel_pack_to_epub/     # 捕获包 → EPUB skill
 ├── novel_catcher/
-│   ├── config.py             # 配置管理（config.json）
-│   ├── db.py                 # SQLite 书籍库
-│   ├── manager.py            # 下载任务管理（并发/取消/进度）
-│   ├── crawler/
-│   │   ├── http.py           # HTTP 层（指纹模拟/重试/编码识别）
-│   │   ├── discover.py       # 章节位置推测
-│   │   ├── extract.py        # 正文提取与清洗
-│   │   └── pipeline.py       # 抓取管线
-│   └── exporter/
-│       ├── txt.py            # TXT 导出
-│       └── epub.py           # EPUB 导出
-├── tests/                    # 自动化测试（本地模拟站 + 集成测试）
-└── output/                   # 下载输出（不入库）
+│   ├── capture.py                  # 捕获包：分类、去重、导出、组装 BookResult
+│   ├── crawler/                    # HTTP / 正文提取 / 目录发现 / 站点规则
+│   ├── exporter/                   # TXT / EPUB 导出
+│   ├── config.py                   # 配置管理
+│   └── manager.py                  # 历史下载任务（保留兼容）
+├── tests/                          # 自动化测试
+└── output/                         # 输出目录（不入库）
 ```
 
 ## 测试
 
 ```bat
-python tests\test_pipeline.py   :: 引擎端到端测试（16 项断言）
-python tests\test_integration.py :: 管理器+数据库+导出集成测试
+.\.buildenv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+.\.buildenv\Scripts\python.exe tests\test_pipeline.py
+.\.buildenv\Scripts\python.exe tests\test_integration.py
 ```
 
-测试使用本地模拟小说站（`tests/mock_site.py`），不依赖外网，可重复运行。
+测试使用本地模拟小说站，不依赖外网。
 
-## 常见问题
+## 使用边界
 
-| 现象 | 处理 |
-|---|---|
-| 403 / 连接被重置 | 站点可能封禁当前网络或开启反爬；稍后再试或换站点 |
-| 预览只发现你给的几章 | 该站 URL 无数字规律且无目录/上下章链接，暂无法自动推断 |
-| EPUB 生成失败 | 不影响 TXT 输出，可查看日志原因 |
-| 下载速度慢 | 提高「设置 → 并发数」，注意控制礼貌性 |
-
-## 贡献指南
-
-请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，其中包含提交信息规范、分支规范与开发约定。
+> ⚠️ 本工具只用于整理**非版权（公版）作品**和用户有权访问的内容。
+> 不自动补抓缺失章节，不虚构内容。请遵守目标网站访问规则与当地法律。
 
 ## 许可证
 
