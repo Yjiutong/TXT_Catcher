@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""正文提取与清洗：定位正文容器、清理广告与噪音、识别章节标题与分页。"""
+"""正文提取与清洗：定位正文容器、清理广告与噪音、识别内容标题与分页。"""
 import re
 from urllib.parse import urljoin
 
@@ -61,7 +61,7 @@ _AD_LINE_PATTERNS = [
 
 _TITLE_SEP_RE = re.compile(r"[\s_\-—|·:：<>《》()（）【】\[\]]+")
 
-# 章节标题常见前缀噪音（novel_spider 用 lstrip('章 节目录 ') 处理同类问题）
+# 内容标题常见前缀噪音（novel_spider 用 lstrip('章 节目录 ') 处理同类问题）
 _TITLE_PREFIXES = ("章 节目录", "章节目录", "正文", "最新章节", "章节")
 
 # 规则提取的正文质量门槛（低于此视为规则失效，回退启发式）
@@ -85,7 +85,7 @@ _TITLE_SUFFIX_RE = re.compile(r"(目录|章节目录|章节列表|最新章节|�
 
 
 def clean_title(title: str, rule=None) -> str:
-    """清洗章节标题：去掉站点前缀噪音与空白。"""
+    """清洗内容标题：去掉站点前缀噪音与空白。"""
     if not title:
         return ""
     t = title.strip()
@@ -101,7 +101,7 @@ def clean_title(title: str, rule=None) -> str:
 
 
 def extract_title_by_rule(soup, rule) -> str:
-    """按规则的 title 选择器提取章节标题。"""
+    """按规则的 title 选择器提取内容标题。"""
     if soup is None or not (rule or {}).get("title"):
         return ""
     try:
@@ -113,7 +113,7 @@ def extract_title_by_rule(soup, rule) -> str:
     return clean_title(el.get_text("", strip=True), rule)
 
 
-def extract_chapter_by_rule(soup, rule):
+def extract_content_by_rule(soup, rule):
     """按规则的 content 选择器定位正文容器；质量不合格返回 None（回退启发式）。
 
     注意：只做轻量校验、不分解噪音节点，避免破坏"先找分页链接再清洗正文"的顺序。
@@ -135,8 +135,8 @@ def extract_chapter_by_rule(soup, rule):
     return el
 
 
-def find_next_chapter_link_by_rule(page: Page, rule) -> str:
-    """按规则的 next 选择器找“下一章”链接。"""
+def find_next_link_by_rule(page: Page, rule) -> str:
+    """按规则的 next 选择器找“下一个条目”链接。"""
     if page is None or page.soup is None or not (rule or {}).get("next"):
         return ""
     try:
@@ -319,8 +319,8 @@ def extract_paragraphs(container) -> list:
     return out
 
 
-def extract_chapter_title(page: Page, container) -> str:
-    """从页面中提取章节标题。"""
+def extract_content_title(page: Page, container) -> str:
+    """从页面中提取内容标题。"""
     soup = page.soup
     if soup is None:
         return ""
@@ -396,20 +396,20 @@ def _pick_title_from_document_title(raw: str, chapter_title: str = "") -> str:
     return max(parts, key=len)
 
 
-def extract_book_metadata(page: Page, chapter_title: str = "") -> tuple:
-    """从章节页/目录页提取书名与作者；提取不到时返回空字符串。
+def extract_metadata(page: Page, chapter_title: str = "") -> tuple:
+    """从内容页/列表页提取集合标题与作者；提取不到时返回空字符串。
 
-    顺序参考 NovelGetter 的 #content / .bookname / 作者标记解析思路：
+    提取思路：
       1) 页面上 bookname/book-title 等容器
-      2) <title> 去掉章节名与站点后缀后的片段
-      3) 非章节标题的 h1/h2
+      2) <title> 去掉条目名与站点后缀后的片段
+      3) 非内容标题的 h1/h2
       4) <meta name=author> / itemprop、作者 id/class 容器
     """
     if page is None or page.soup is None:
         return "", ""
     soup = page.soup
     if not chapter_title:
-        chapter_title = extract_chapter_title(page, None)
+        chapter_title = extract_content_title(page, None)
     title, author = "", ""
 
     # 1) 显式书名容器
@@ -435,7 +435,7 @@ def extract_book_metadata(page: Page, chapter_title: str = "") -> tuple:
         title = _pick_title_from_document_title(
             soup.title.get_text(strip=True), chapter_title)
 
-    # 3) h1/h2（排除章节标题）
+    # 3) h1/h2（排除内容标题）
     if not title:
         for el in soup.find_all(["h1", "h2"], limit=8):
             text = _normal_text(el.get_text(" ", strip=True))
@@ -483,13 +483,13 @@ _PAGE_CONTAINER_RE = re.compile(
     r"(^|[\s_\-])(page|pages|pagination|pager|listpage|pagebar|fy|page-box|"
     r"chapter-page|content-page|article-page|page_area|turnpage|page-list)([^a-z]|$)",
     re.I)
-_CHAPTER_NEXT_RE = re.compile(r"下一章|下章|下一節|下一节|next chapter", re.I)
+_NEXT_ITEM_RE = re.compile(r"下一章|下章|下一節|下一节|next chapter", re.I)
 
 
 def find_pagination_link(page: Page, container) -> str:
-    """在当前页寻找“正文分页”链接（下一页，但排除下一章）。
+    """在当前页寻找“正文分页”链接（下一页，但排除下一个条目）。
 
-    判定：链接文本匹配“下一页/下页”；且指向的 URL 与当前 URL 不是不同章节页。
+    判定：链接文本匹配“下一页/下页”；且指向的 URL 与当前 URL 不是不同条目页。
     这里只返回候选链接，由调用方抓取后用标题比对确认。
     """
     soup = page.soup
@@ -501,15 +501,15 @@ def find_pagination_link(page: Page, container) -> str:
         href = a["href"].strip()
         if not href or href.startswith(("javascript:", "#")):
             continue
-        if _PAGE_NEXT_RE.search(text) and not _CHAPTER_NEXT_RE.search(text):
+        if _PAGE_NEXT_RE.search(text) and not _NEXT_ITEM_RE.search(text):
             abs_url = page.resolve(href)
             if abs_url != page.url:
                 return abs_url
     return ""
 
 
-def find_next_chapter_link(page: Page) -> str:
-    """寻找“下一章”链接。"""
+def find_next_link(page: Page) -> str:
+    """寻找“下一个条目”链接。"""
     soup = page.soup
     if soup is None:
         return ""
@@ -521,7 +521,7 @@ def find_next_chapter_link(page: Page) -> str:
         if not href or href.startswith(("javascript:", "#")):
             continue
         rel = a.get("rel") or []
-        if _CHAPTER_NEXT_RE.search(text) or (isinstance(rel, list) and "next" in rel):
+        if _NEXT_ITEM_RE.search(text) or (isinstance(rel, list) and "next" in rel):
             abs_url = page.resolve(href)
             if abs_url != page.url:
                 candidates.append(abs_url)
@@ -530,8 +530,8 @@ def find_next_chapter_link(page: Page) -> str:
     return ""
 
 
-def find_prev_chapter_link(page: Page) -> str:
-    """寻找“上一章”链接。"""
+def find_prev_link(page: Page) -> str:
+    """寻找“上一个条目”链接。"""
     soup = page.soup
     if soup is None:
         return ""
@@ -550,8 +550,8 @@ def find_prev_chapter_link(page: Page) -> str:
     return ""
 
 
-def looks_like_chapter_page(page: Page) -> bool:
-    """判断页面是否像一个章节正文页（用于数字推断验证）。"""
+def looks_like_content_page(page: Page) -> bool:
+    """判断页面是否像一个正文页（用于数字推断验证）。"""
     if page is None or page.soup is None:
         return False
     container = find_content_container(page.soup)
@@ -593,7 +593,7 @@ def _url_numbers(url: str):
 
 
 def _same_pagination_series(cur: str, cand: str) -> bool:
-    """候选 URL 是否属于当前章节的分页系列（宽松判断，标题比对兜底）。"""
+    """候选 URL 是否属于当前条目的分页系列（宽松判断，标题比对兜底）。"""
     from urllib.parse import urlparse, parse_qs
     import posixpath
     p1, p2 = urlparse(cur), urlparse(cand)
@@ -616,7 +616,7 @@ def _same_pagination_series(cur: str, cand: str) -> bool:
         if stem1 == stem2 and suf1 == suf2 and n2 > n1:
             return True
         # 当前主干 + 页码后缀：3.html -> 3_2.html / g1.html -> g1_2.html
-        # （章节号可能大于页码，故不比较数值；是否同章由标题比对兜底）
+        # （条目号可能大于页码，故不比较数值；是否同条目由标题比对兜底）
         if stem2 != stem1 and stem2.startswith(stem1):
             return True
         return False
@@ -655,8 +655,8 @@ def find_pagination_candidates(page: Page, container) -> list:
       4) 链接位于分页控件内（id/class 含 page/pagination 等），且 URL 紧邻递增
 
     安全性：候选必须与当前 URL 同站点、同目录、且属于同一数字系列
-    （章节页 g1.html → g1_2.html / g1_3.html；纯数字页 3.html → 4.html；
-    ?page=2 → ?page=3）。是否同章由调用方抓取后比对章节核心确认。
+    （条目页 g1.html → g1_2.html / g1_3.html；纯数字页 3.html → 4.html；
+    ?page=2 → ?page=3）。是否同条目由调用方抓取后比对条目核心确认。
     """
     soup = page.soup
     if soup is None:
@@ -679,7 +679,7 @@ def find_pagination_candidates(page: Page, container) -> list:
 
             score = 0
             is_next_text = False
-            if _PAGE_NEXT_TEXT_RE.search(combined) and not _CHAPTER_NEXT_RE.search(
+            if _PAGE_NEXT_TEXT_RE.search(combined) and not _NEXT_ITEM_RE.search(
                     combined) and not _PAGE_EXCLUDE_TEXT_RE.search(combined):
                 score = max(score, 4)
                 is_next_text = True
@@ -705,10 +705,11 @@ _CORE_ZH_RE = re.compile(r"第[\d零一二三四五六七八九十百千万]+(�
 _CORE_EN_RE = re.compile(r"(chapter|volume|part|book)\s*\d+", re.I)
 
 
-def chapter_core(title: str) -> str:
-    """提取章节核心标识用于分页比对。
+def content_core(title: str) -> str:
+    """提取条目核心标识用于分页比对。
 
-    “第3章(2/3)” 与 “第3章” 视为同一章；与 “第4章” 视为不同章。
+    “第3章(2/3)” 与 “第3章” 视为同一章；与 “第4章” 视为不同章；
+    无“第X章/Chapter N”模式时退回标题前 8 个字符。
     """
     if not title:
         return ""

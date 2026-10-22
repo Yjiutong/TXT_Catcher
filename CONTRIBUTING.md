@@ -78,12 +78,14 @@ test(pipeline): 增加 GBK 编码与分页合并场景断言
 ## 4. 提交前检查
 
 ```bat
-python tests\test_pipeline.py      :: 引擎测试必须全部通过
-python tests\test_integration.py   :: 集成测试必须通过
+python tests\test_pipeline.py    :: 引擎端到端测试必须全部通过
+python tests\test_rules.py       :: 站点规则层测试必须通过
+python tests\test_capture.py     :: 捕获包测试必须通过
+python tests\test_cli.py         :: 命令行冒烟测试必须通过
 ```
 
 - 提交前清理调试代码与临时文件
-- 不提交：`output/`、`config.json`、`novel_catcher.db`、`logs/`、`dist/`（见 [.gitignore](.gitignore)）
+- 不提交：`output/`、`captures/`、`config.json`、`logs/`、`dist/`（见 [.gitignore](.gitignore)）
 
 ## 5. PR 流程
 
@@ -97,5 +99,5 @@ python tests\test_integration.py   :: 集成测试必须通过
 ## 6. 发布流程（维护者）
 
 - 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)（`MAJOR.MINOR.PATCH`）
-- 每次发版：更新 `CHANGELOG.md` → 打 tag（如 `v1.0.1`）→ 构建 exe 并发布到 Releases
-- 发布提交建议使用：`chore(release): v1.0.1`
+- 每次发版：更新 `CHANGELOG.md` → 更新 `__version__` → 打 tag（如 `v2.0.0`）
+- 发布提交建议使用：`chore(release): v2.0.0`

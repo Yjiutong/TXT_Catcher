@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "txt-catcher"
+version = "2.0.0"
+description = "整理网络任意公开文字数据的抓取 Skill：抓取、清洗、分页合并、列表发现、结构化导出"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "charset-normalizer>=3.0",
+    "curl_cffi>=0.16",
+]
+
+[project.scripts]
+txt-catcher = "txt_catcher.cli:main"
+
+[tool.setuptools]
+packages = ["txt_catcher"]

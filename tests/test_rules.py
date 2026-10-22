@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""站点规则层测试：规则提取 / 标题裁剪 / 规则下一章 / 规则目录 / 失效回退 / 全流程。
-
-混合自 novel_spider 的站点固定选择器思路（.jieqi_title / #content / .next）。
-"""
+"""站点规则层测试：规则提取 / 标题裁剪 / 规则下一项 / 规则列表 / 失效回退 / 全流程。"""
 import os
 import sys
 import unittest
@@ -11,11 +8,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bs4 import BeautifulSoup
 
-from novel_catcher.config import Config
-from novel_catcher.crawler.http import HttpFetcher, Page
-from novel_catcher.crawler import discover, extract
-from novel_catcher.crawler.rules import BUILTIN_RULES, get_rules, rule_for
-from novel_catcher.crawler.pipeline import BookCrawler
+from txt_catcher.config import Config
+from txt_catcher.http import HttpFetcher, Page
+from txt_catcher import discover, extract
+from txt_catcher.rules import BUILTIN_RULES, get_rules, rule_for
+from txt_catcher.pipeline import Collector
 from mock_site import MockSite, BASE
 
 # 模拟站点规则（对应 BOOK_D/E，host 为 127.0.0.1）
@@ -38,7 +35,7 @@ class TestRules(unittest.TestCase):
         cls.site.stop()
 
     def test_rule_for_host_matching(self):
-        """内置规则（novel_spider 原站 quanshuwang）的域名匹配。"""
+        """内置规则（quanshuwang 示例）的域名匹配。"""
         r = rule_for("http://www.quanshuwang.com/book/44/44683/15379609.html",
                      BUILTIN_RULES)
         self.assertEqual(r.get("content"), "#content")
@@ -53,7 +50,7 @@ class TestRules(unittest.TestCase):
     def test_rule_extraction_and_title_clean(self):
         """BOOK_D：规则定位正文 + 标题前缀裁剪 + 广告/标记剔除。"""
         page = self.fetcher.fetch(f"{BASE}/bd/d1.html")
-        cont = extract.extract_chapter_by_rule(page.soup, RULE_D)
+        cont = extract.extract_content_by_rule(page.soup, RULE_D)
         self.assertIsNotNone(cont)
         paras = extract.extract_paragraphs(cont)
         self.assertGreaterEqual(len(paras), 4)
@@ -65,10 +62,10 @@ class TestRules(unittest.TestCase):
         title = extract.extract_title_by_rule(page.soup, RULE_D)
         self.assertEqual(title, "第1章·测试回目A")
 
-    def test_book_metadata_extraction(self):
-        """从章节页/显式容器提取书名与作者（NovelGetter 元信息思路）。"""
+    def test_metadata_extraction(self):
+        """从内容页/显式容器提取集合标题与作者。"""
         page = self.fetcher.fetch(f"{BASE}/ba/1.html")
-        title, author = extract.extract_book_metadata(page)
+        title, author = extract.extract_metadata(page)
         self.assertEqual(title, "测试小说")
         self.assertEqual(author, "")  # 无作者标记时保持空串
 
@@ -78,7 +75,7 @@ class TestRules(unittest.TestCase):
         soup = BeautifulSoup(html, "lxml")
         page2 = Page("http://example.com/c1.html", "http://example.com/c1.html",
                      200, html, soup)
-        t2, a2 = extract.extract_book_metadata(page2)
+        t2, a2 = extract.extract_metadata(page2)
         self.assertEqual(t2, "示例书名")
         self.assertEqual(a2, "张三")
 
@@ -89,8 +86,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(extract.clean_title("  第9章·标题  "), "第9章·标题")
 
     def test_rule_next_walk(self):
-        """BOOK_D：按规则 next 选择器行走下一章。"""
-        nxt = extract.find_next_chapter_link_by_rule(
+        """BOOK_D：按规则 next 选择器行走下一个条目。"""
+        nxt = extract.find_next_link_by_rule(
             self.fetcher.fetch(f"{BASE}/bd/d1.html"), RULE_D)
         self.assertTrue(nxt.endswith("/bd/d2.html"))
         urls = discover.walk_by_next_link(
@@ -98,16 +95,16 @@ class TestRules(unittest.TestCase):
         self.assertEqual(len(urls), 6)
         self.assertEqual(urls[-1].split("/")[-1], "d6.html")
 
-    def test_rule_toc_discovery(self):
-        """BOOK_E：规则目录入口 + 容器（无规则时目录不可发现）。"""
-        # 无规则：找不到目录（作品列表不在启发式关键词内），且 URL 无数字、无上下章
-        plain = discover.discover_chapters(self.fetcher, [f"{BASE}/be/one.html"],
-                                           max_chapters=50)
+    def test_rule_list_discovery(self):
+        """BOOK_E：规则列表入口 + 容器（无规则时列表不可发现）。"""
+        # 无规则：找不到列表（作品列表不在启发式关键词内），且 URL 无数字、无上下项
+        plain = discover.discover_items(self.fetcher, [f"{BASE}/be/one.html"],
+                                        max_items=50)
         self.assertEqual(len(plain), 1)
-        # 有规则：通过 #catalog 进目录页、#qingdan 解析出 8 章
-        with_rule = discover.discover_chapters(self.fetcher, [f"{BASE}/be/one.html"],
-                                               max_chapters=50,
-                                               rules=[RULE_E])
+        # 有规则：通过 #catalog 进列表页、#qingdan 解析出 8 条
+        with_rule = discover.discover_items(self.fetcher, [f"{BASE}/be/one.html"],
+                                            max_items=50,
+                                            rules=[RULE_E])
         self.assertEqual(len(with_rule), 8)
         self.assertTrue(with_rule[0].endswith("/be/one.html"))
         self.assertTrue(with_rule[-1].endswith("/be/eight.html"))
@@ -115,32 +112,32 @@ class TestRules(unittest.TestCase):
     def test_rule_invalid_falls_back(self):
         """规则 content 命中无效短文本 → 回退启发式。"""
         page = self.fetcher.fetch(f"{BASE}/bf/f1.html")
-        self.assertIsNone(extract.extract_chapter_by_rule(page.soup, RULE_BAD))
+        self.assertIsNone(extract.extract_content_by_rule(page.soup, RULE_BAD))
         cont = extract.find_content_container(page.soup)
         self.assertIsNotNone(cont)
         paras = extract.extract_paragraphs(cont)
         self.assertGreaterEqual(len(paras), 4)
 
     def test_fallback_paragraphs_with_br(self):
-        """无 <p> 标签时按 <br>/&nbsp; 切分正文（NovelGetter 兼容）。"""
+        """无 <p> 标签时按 <br>/&nbsp; 切分正文。"""
         html = '<div id="content">第一段<br>第二段&nbsp;测试<br>第三段</div>'
         soup = BeautifulSoup(html, "lxml")
         paras = extract.extract_paragraphs(soup.find(id="content"))
         self.assertEqual(paras, ["第一段", "第二段 测试", "第三段"])
 
     def test_full_crawl_with_rules(self):
-        """BookCrawler + 规则：全流程抓取 BOOK_D 6 章。"""
-        crawler = BookCrawler(self.fetcher, self.cfg)
-        book = crawler.crawl([f"{BASE}/bd/d1.html"], rules=[RULE_D])
-        self.assertEqual(book.chapter_count, 6)
-        self.assertEqual(book.title, "测试小说")
-        self.assertEqual(book.author, "佚名")
-        self.assertEqual(book.chapters[0].title, "第1章·测试回目A")
-        self.assertEqual(book.chapters[5].title, "第6章·测试回目F")
-        joined = book.chapters[0].body
+        """Collector + 规则：全流程抓取 BOOK_D 6 条。"""
+        collector = Collector(self.fetcher, self.cfg)
+        coll = collector.crawl([f"{BASE}/bd/d1.html"], rules=[RULE_D])
+        self.assertEqual(coll.item_count, 6)
+        self.assertEqual(coll.title, "测试小说")
+        self.assertEqual(coll.author, "")
+        self.assertEqual(coll.items[0].title, "第1章·测试回目A")
+        self.assertEqual(coll.items[5].title, "第6章·测试回目F")
+        joined = coll.items[0].body
         self.assertNotIn("style5", joined)
         self.assertNotIn("天才一秒记住", joined)
-        self.assertGreater(book.word_count, 0)
+        self.assertGreater(coll.word_count, 0)
 
     def test_get_rules_merges_config(self):
         """config.json 的 site_rules 扩展/覆盖内置规则。"""

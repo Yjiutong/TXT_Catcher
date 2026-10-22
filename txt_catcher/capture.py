@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""阅读浏览捕获：把用户浏览过的网页整理为可交给 Codex 的捕获包。
+"""页面捕获：把任意公开网页忠实记录为结构化的捕获包，供任意 agent 整理。
 
-本模块不再负责“自动推理整本书并全站抓取”，而是忠实记录用户在阅读浏览器里
-打开过的页面。每个页面会被归类为目录候选 / 正文候选 / 其他，并附带可点击链接、
-标题、正文段落与章节目录候选，方便后续 skill 整理成 EPUB。
+本模块不负责全站自动抓取，而是忠实记录用户浏览过的页面。每个页面会被归类为
+列表页 / 内容页 / 其他，并附带可点击链接、标题、正文段落与条目列表候选，
+方便后续任意 agent 整理为文档。
 """
 import json
 import os
@@ -13,22 +13,21 @@ import zipfile
 from datetime import datetime
 from urllib.parse import urlparse
 
-from . import utils
-from .crawler import discover, extract
-from .crawler.pipeline import BookResult, Chapter
-from .crawler.rules import rule_for
+from . import discover, extract, utils
+from .pipeline import Collection, Item
+from .rules import rule_for
 
-KIND_TOC = "toc"
-KIND_CHAPTER = "chapter"
+KIND_LIST = "list"
+KIND_ITEM = "item"
 KIND_OTHER = "other"
 
 _KIND_LABEL = {
-    KIND_TOC: "目录候选",
-    KIND_CHAPTER: "正文候选",
+    KIND_LIST: "列表页候选",
+    KIND_ITEM: "内容页候选",
     KIND_OTHER: "其他页面",
 }
 
-_TOC_IDCLASS_RE = re.compile(
+_LIST_IDCLASS_RE = re.compile(
     r"(catalog|chapterlist|chapter-list|booklist|book-list|mulu|toc|chapter_index|"
     r"zhangjie|chapter-list-container|listmain|dir|menu-main|chapterList)", re.I)
 
@@ -59,35 +58,35 @@ def _abs_links(page) -> list:
 
 
 def _nav_links(page) -> dict:
-    """常用导航链接：下一章 / 上一章 / 目录。"""
+    """常用导航链接：下一个条目 / 上一个条目 / 列表。"""
     out = {}
-    nxt = extract.find_next_chapter_link(page)
-    prev = extract.find_prev_chapter_link(page)
-    toc = discover.find_toc_link(page)
+    nxt = extract.find_next_link(page)
+    prev = extract.find_prev_link(page)
+    lst = discover.find_list_link(page)
     if nxt:
-        out["next"] = {"title": "下一章", "url": nxt}
+        out["next"] = {"title": "下一项", "url": nxt}
     if prev:
-        out["prev"] = {"title": "上一章", "url": prev}
-    if toc:
-        out["toc"] = {"title": "目录", "url": toc}
+        out["prev"] = {"title": "上一项", "url": prev}
+    if lst:
+        out["list"] = {"title": "列表", "url": lst}
     return out
 
 
 def classify_page(page, rule=None) -> str:
-    """判断页面更像目录页还是正文页；都不像则返回 other。"""
+    """判断页面更像列表页还是内容页；都不像则返回 other。"""
     if page is None or page.soup is None:
         return KIND_OTHER
-    toc_items = discover.parse_toc_page(page, rule=rule)
-    if _looks_like_toc_page(page, rule) or len(toc_items) >= 20:
-        return KIND_TOC
+    list_items = discover.parse_list_page(page, rule=rule)
+    if _looks_like_list_page(page, rule) or len(list_items) >= 20:
+        return KIND_LIST
     paras = extract.extract_paragraphs(extract.find_content_container(page.soup))
-    if extract.looks_like_chapter_page(page) or sum(len(p) for p in paras) >= 100:
-        return KIND_CHAPTER
+    if extract.looks_like_content_page(page) or sum(len(p) for p in paras) >= 100:
+        return KIND_ITEM
     return KIND_OTHER
 
 
-def _looks_like_toc_page(page, rule=None) -> bool:
-    """仅在页面存在明确目录容器或规则目录选择器时判定为目录页。"""
+def _looks_like_list_page(page, rule=None) -> bool:
+    """仅在页面存在明确列表容器或规则列表选择器时判定为列表页。"""
     if page is None or page.soup is None:
         return False
     soup = page.soup
@@ -100,7 +99,7 @@ def _looks_like_toc_page(page, rule=None) -> bool:
             pass
     for el in soup.find_all(["div", "ul", "ol", "dl"]):
         idc = extract._element_id_class(el)
-        if _TOC_IDCLASS_RE.search(idc) and len(el.find_all("a", href=True)) >= 5:
+        if _LIST_IDCLASS_RE.search(idc) and len(el.find_all("a", href=True)) >= 5:
             return True
     return False
 
@@ -109,20 +108,20 @@ def capture_page(page, rules=None) -> dict:
     """把一个抓回来的 Page 转成捕获包记录。"""
     rules = rules or []
     rule = rule_for(page.url, rules) if rules else {}
-    container = extract.extract_chapter_by_rule(page.soup, rule)
+    container = extract.extract_content_by_rule(page.soup, rule)
     if container is None:
         container = extract.find_content_container(page.soup)
     paragraphs = extract.extract_paragraphs(container)
     title = extract.extract_title_by_rule(page.soup, rule)
     if not title:
-        title = extract.extract_chapter_title(page, container)
+        title = extract.extract_content_title(page, container)
     if not title and page.soup and page.soup.title:
         title = page.soup.title.get_text(" ", strip=True)
-    toc_items = discover.parse_toc_page(page, rule=rule)
+    list_items = discover.parse_list_page(page, rule=rule)
     kind = classify_page(page, rule)
-    book_title, author = extract.extract_book_metadata(page, title)
-    if not book_title and toc_items:
-        book_title = _guess_book_from_toc(page, toc_items)
+    coll_title, author = extract.extract_metadata(page, title)
+    if not coll_title and list_items:
+        coll_title = _guess_title_from_list(page, list_items)
 
     return {
         "url": utils.normalize_url(page.url),
@@ -131,20 +130,20 @@ def capture_page(page, rules=None) -> dict:
         "kind": kind,
         "kind_label": kind_label(kind),
         "title": title or "",
-        "book_title": book_title,
+        "collection_title": coll_title,
         "author": author,
         "paragraphs": paragraphs,
         "text": "\n\n".join(paragraphs),
-        "toc_items": [{"title": t, "url": u} for t, u in toc_items],
+        "list_items": [{"title": t, "url": u} for t, u in list_items],
         "nav": _nav_links(page),
         "links": _abs_links(page),
         "char_count": utils.text_word_count("\n".join(paragraphs)),
     }
 
 
-def _guess_book_from_toc(page, toc_items) -> str:
-    """从目录页标题猜测书名。"""
-    if not page or page.soup is None or not toc_items:
+def _guess_title_from_list(page, list_items) -> str:
+    """从列表页标题猜测集合标题。"""
+    if not page or page.soup is None or not list_items:
         return ""
     if page.soup.title:
         raw = page.soup.title.get_text(" ", strip=True)
@@ -154,16 +153,16 @@ def _guess_book_from_toc(page, toc_items) -> str:
             cleaned = re.sub(r"(目录|章节目录|章节列表|最新章节|小说阅读|阅读网)$", "", parts[0])
             if cleaned and len(cleaned) <= 40:
                 return cleaned
-    return toc_items[0][0] if toc_items else ""
+    return list_items[0][0] if list_items else ""
 
 
 class CaptureSession:
-    """记录当前浏览会话里捕获到的页面，并导出 Codex 可读的包。"""
+    """记录当前会话里捕获到的页面，并导出任意 agent 可读的包。"""
 
     def __init__(self):
         self.records = []
         self._url_seen = set()
-        self.book_title = ""
+        self.title = ""
         self.author = ""
         self.started_at = datetime.now().isoformat(timespec="seconds")
 
@@ -185,43 +184,43 @@ class CaptureSession:
         return {"title": "", "kind": KIND_OTHER, "paragraphs": [], "text": ""}
 
     def _refresh_meta(self, rec):
-        if rec.get("book_title") and not self.book_title:
-            self.book_title = rec["book_title"]
+        if rec.get("collection_title") and not self.title:
+            self.title = rec["collection_title"]
         if rec.get("author") and not self.author:
             self.author = rec["author"]
 
     def summary(self) -> dict:
-        toc_count = sum(1 for r in self.records if r.get("kind") == KIND_TOC)
-        chapter_count = sum(1 for r in self.records if r.get("kind") == KIND_CHAPTER)
+        list_count = sum(1 for r in self.records if r.get("kind") == KIND_LIST)
+        item_count = sum(1 for r in self.records if r.get("kind") == KIND_ITEM)
         other_count = sum(1 for r in self.records if r.get("kind") == KIND_OTHER)
         chars = sum(r.get("char_count", 0) for r in self.records)
         return {
             "pages": len(self.records),
-            "toc_pages": toc_count,
-            "chapter_pages": chapter_count,
+            "list_pages": list_count,
+            "item_pages": item_count,
             "other_pages": other_count,
             "chars": chars,
         }
 
     def to_package(self) -> dict:
-        """构建与 Codex skill 约定的包结构。"""
+        """构建与任意 agent skill 约定的包结构。"""
         sorted_records = self._ordered_records()
         return {
-            "schema_version": 1,
-            "format": "txt_catcher_browser_capture",
+            "schema_version": 2,
+            "format": "txt_catcher_capture",
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "started_at": self.started_at,
-            "book_title": self.book_title,
+            "title": self.title,
             "author": self.author,
             "summary": self.summary(),
             "pages": sorted_records,
         }
 
     def _ordered_records(self) -> list:
-        """尝试按目录顺序排列章节记录；无目录时保留访问顺序。"""
+        """尝试按列表顺序排列条目记录；无列表时保留访问顺序。"""
         order_index = {}
         for rec in self.records:
-            for i, item in enumerate(rec.get("toc_items", [])):
+            for i, item in enumerate(rec.get("list_items", [])):
                 order_index.setdefault(item.get("url", ""), (0, i))
         out = list(self.records)
         for idx, rec in enumerate(out):
@@ -237,19 +236,19 @@ class CaptureSession:
         """导出捕获包：文件夹 + zip，返回 zip 路径。"""
         os.makedirs(out_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base = utils.safe_filename(self.book_title or "阅读捕获", "阅读捕获")
+        base = utils.safe_filename(self.title or "页面捕获", "页面捕获")
         folder = os.path.join(out_dir, f"{base}_{stamp}")
         os.makedirs(folder, exist_ok=True)
         pkg = self.to_package()
         manifest = {
-            "title": self.book_title,
+            "title": self.title,
             "author": self.author,
             "format": pkg["format"],
             "schema_version": pkg["schema_version"],
             "created_at": pkg["created_at"],
             "summary": pkg["summary"],
             "files": ["pages.json", "all_text.txt"],
-            "next_step": "把这些文件交给 Codex，使用 skills/novel_pack_to_epub 整理为 EPUB。",
+            "next_step": "把这些文件交给任意 agent，使用本仓库的 SKILL.md 与 skills/ 下的示例整理为文档。",
         }
         with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -272,27 +271,27 @@ def _records_to_text(records: list) -> str:
         lines.append(f"分类：{kind_label(rec.get('kind'))}")
         lines.append(f"地址：{rec.get('final_url') or rec.get('url')}")
         lines.append("")
-        if rec.get("toc_items"):
-            lines.append("目录候选：")
-            for i, item in enumerate(rec["toc_items"], 1):
+        if rec.get("list_items"):
+            lines.append("列表页候选：")
+            for i, item in enumerate(rec["list_items"], 1):
                 lines.append(f"{i:>3}. {item['title']}")
                 lines.append(f"     {item['url']}")
             lines.append("")
         if rec.get("paragraphs"):
-            lines.append("正文候选：")
+            lines.append("内容页候选：")
             lines.extend(rec["paragraphs"])
             lines.append("")
     return "\n".join(lines)
 
 
-def build_book_from_package(pkg: dict) -> BookResult:
-    """把捕获包转成 BookResult，供 TXT / EPUB 导出使用。"""
+def build_collection_from_package(pkg: dict) -> Collection:
+    """把捕获包转成 Collection，供导出为纯文本 / Markdown 等格式使用。"""
     records = pkg.get("pages") or []
     order_index = {}
     for rec in records:
-        for i, item in enumerate(rec.get("toc_items", [])):
+        for i, item in enumerate(rec.get("list_items", [])):
             order_index.setdefault(item.get("url", ""), (0, i))
-    chapters = []
+    items = []
     seen = set()
     for rec in records:
         url = rec.get("final_url") or rec.get("url") or ""
@@ -300,16 +299,16 @@ def build_book_from_package(pkg: dict) -> BookResult:
             continue
         seen.add(url)
         paras = rec.get("paragraphs") or []
-        if rec.get("toc_items") and not paras:
+        if rec.get("list_items") and not paras:
             continue
-        title = rec.get("title") or "未命名章节"
+        title = rec.get("title") or "未命名条目"
         if not paras and len(title) < 2:
             continue
-        chapters.append(Chapter(url, title, paras))
-    # 按 URL 在目录里出现的顺序排序，其次保留原顺序
-    chapters.sort(key=lambda ch: order_index.get(ch.url, (1, 0)))
-    title = (pkg.get("book_title") or (
-        chapters[0].title if chapters else "未命名书籍"))
-    author = pkg.get("author") or "佚名"
-    return BookResult(title, author, chapters)
+        items.append(Item(url, title, paras))
+    # 按 URL 在列表里出现的顺序排序，其次保留原顺序
+    items.sort(key=lambda ch: order_index.get(ch.url, (1, 0)))
+    title = (pkg.get("title") or (
+        items[0].title if items else "未命名合集"))
+    author = pkg.get("author") or ""
+    return Collection(title, author, items)
 

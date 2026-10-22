@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""阅读浏览器捕获包测试：分类、去重、导出包、整理为 BookResult。"""
+"""捕获包测试：页面分类、去重、导出包、整理为 Collection。"""
 import json
 import os
 import sys
@@ -9,10 +9,10 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from novel_catcher.capture import build_book_from_package, capture_page
-from novel_catcher.capture import CaptureSession, KIND_CHAPTER, KIND_TOC
-from novel_catcher.config import Config
-from novel_catcher.crawler.http import HttpFetcher
+from txt_catcher.capture import build_collection_from_package, capture_page
+from txt_catcher.capture import CaptureSession, KIND_ITEM, KIND_LIST
+from txt_catcher.config import Config
+from txt_catcher.http import HttpFetcher
 from mock_site import MockSite, BASE
 
 
@@ -27,11 +27,11 @@ class TestCapture(unittest.TestCase):
     def tearDownClass(cls):
         cls.site.stop()
 
-    def test_classify_toc_and_chapter(self):
-        toc_page = self.fetcher.fetch(f"{BASE}/ba/index.html")
-        chapter_page = self.fetcher.fetch(f"{BASE}/ba/1.html")
-        self.assertEqual(capture_page(toc_page)["kind"], KIND_TOC)
-        self.assertEqual(capture_page(chapter_page)["kind"], KIND_CHAPTER)
+    def test_classify_list_and_item(self):
+        list_page = self.fetcher.fetch(f"{BASE}/ba/index.html")
+        item_page = self.fetcher.fetch(f"{BASE}/ba/1.html")
+        self.assertEqual(capture_page(list_page)["kind"], KIND_LIST)
+        self.assertEqual(capture_page(item_page)["kind"], KIND_ITEM)
 
     def test_session_dedupe_and_package(self):
         session = CaptureSession()
@@ -47,21 +47,22 @@ class TestCapture(unittest.TestCase):
         with zipfile.ZipFile(zip_path) as z:
             with z.open("pages.json") as f:
                 pkg = json.load(f)
-        self.assertEqual(pkg["format"], "txt_catcher_browser_capture")
+        self.assertEqual(pkg["format"], "txt_catcher_capture")
+        self.assertEqual(pkg["schema_version"], 2)
         self.assertEqual(len(pkg["pages"]), 3)
 
-        book = build_book_from_package(pkg)
-        self.assertGreaterEqual(book.chapter_count, 2)
-        self.assertTrue(book.word_count > 0)
+        coll = build_collection_from_package(pkg)
+        self.assertGreaterEqual(coll.item_count, 2)
+        self.assertTrue(coll.word_count > 0)
 
-    def test_build_book_uses_toc_order(self):
+    def test_build_collection_uses_list_order(self):
         session = CaptureSession()
         session.add(self.fetcher.fetch(f"{BASE}/ba/index.html"))
         session.add(self.fetcher.fetch(f"{BASE}/ba/3.html"))
         session.add(self.fetcher.fetch(f"{BASE}/ba/1.html"))
         pkg = session.to_package()
-        book = build_book_from_package(pkg)
-        titles = [ch.title for ch in book.chapters]
+        coll = build_collection_from_package(pkg)
+        titles = [it.title for it in coll.items]
         self.assertIn("第01章·测试回目A", titles)
         self.assertIn("第03章·测试回目C", titles)
         self.assertLess(titles.index("第01章·测试回目A"),
@@ -70,4 +71,3 @@ class TestCapture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -3,7 +3,7 @@
 
 混合自 novel_spider（github.com/dyboy2017/novel_spider）的核心思路——
 其按站点固定选择器抓取（标题 .jieqi_title、正文 #content、下一章 .next），
-这里将其泛化为可配置的 per-host 规则表，供正文提取与章节发现优先使用。
+这里将其泛化为可配置的 per-host 规则表，供正文提取与条目发现优先使用。
 
 规则来源：
   1) 内置规则（BUILTIN_RULES，含 novel_spider 原站点规则作为示例）
@@ -11,11 +11,11 @@
 
 字段说明：
   host         域名匹配：精确或以后缀匹配（含子域名）
-  title       章节标题 CSS 选择器
+  title       内容标题 CSS 选择器
   content      正文容器 CSS 选择器
-  next         下一章链接 CSS 选择器（a 元素，取其 href）
-  toc          目录容器 CSS 选择器（章节列表所在元素）
-  toc_link     目录页入口链接 CSS 选择器（a 元素，取其 href）
+  next         下一个条目链接 CSS 选择器（a 元素，取其 href）
+  toc          列表容器 CSS 选择器（条目列表所在元素）
+  toc_link     列表页入口链接 CSS 选择器（a 元素，取其 href）
   title_strip  标题前缀裁剪（如 novel_spider 的 "章 节目录 "）
 """
 import re

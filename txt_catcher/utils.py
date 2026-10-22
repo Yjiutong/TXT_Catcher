@@ -64,7 +64,7 @@ def replace_last_number(url: str, new_num) -> str:
 
 
 def safe_filename(name: str, fallback: str = "未命名") -> str:
-    """把书名/章节名转成安全的文件名。"""
+    """把标题/条目名转成安全的文件名。"""
     if not name:
         return fallback
     name = re.sub(r'[\\/:*?"<>|\r\n\t]', " ", name).strip()

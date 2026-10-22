@@ -11,8 +11,8 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 import charset_normalizer
 
-from .. import utils
-from ..config import Config
+from . import utils
+from .config import Config
 
 try:
     from curl_cffi import requests as curl_requests

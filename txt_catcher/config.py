@@ -12,20 +12,18 @@ else:
 APP_NAME = "TXT_Catcher"
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, "novel_catcher.db")
 
 DEFAULTS = {
     "output_dir": DEFAULT_OUTPUT_DIR,
-    "concurrency": 2,          # 同时下载的书籍数量
-    "chapter_pool": 3,         # 单本书内并发抓取章节的线程数
-    "timeout": 15,             # 请求超时（秒）
-    "retries": 3,              # 请求失败重试次数
-    "delay": 0.3,              # 章节请求间隔（秒）
+    "timeout": 15,              # 请求超时（秒）
+    "retries": 3,               # 请求失败重试次数
+    "delay": 0.3,               # 请求间隔（秒）
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "max_chapters": 8000,      # 单本书章节数量安全上限
-    "max_chapter_pages": 10,   # 单章正文分页最大页数
-    "site_rules": {},          # 站点规则扩展（域名 -> 选择器配置），覆盖/补充内置规则
+    "max_items": 5000,          # 单个合集条目数量安全上限
+    "max_item_pages": 10,       # 单个条目正文分页最大页数
+    "item_pool": 4,             # 单次集合抓取的并发线程数
+    "site_rules": {},           # 站点规则扩展（域名 -> 选择器配置），覆盖/补充内置规则
 }
 
 
